@@ -15,6 +15,9 @@ const pool = new Pool({
   database: process.env.DB_NAME || 'cloudops_demo',
   password: process.env.DB_PASSWORD || 'password',
   port: process.env.DB_PORT || 5432,
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
 // Middleware
@@ -28,7 +31,7 @@ app.use(express.urlencoded({ extended: true }));
 const initializeDatabase = async () => {
   try {
     const client = await pool.connect();
-    
+
     // Create users table if it doesn't exist
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -38,7 +41,7 @@ const initializeDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    
+
     console.log('Database initialized successfully');
     client.release();
   } catch (err) {
@@ -73,11 +76,11 @@ app.get('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error fetching user:', err);
@@ -89,24 +92,24 @@ app.get('/api/users/:id', async (req, res) => {
 app.post('/api/users', async (req, res) => {
   try {
     const { name, email } = req.body;
-    
+
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email are required' });
     }
-    
+
     const result = await pool.query(
       'INSERT INTO users (name, email) VALUES ($1, $2) RETURNING *',
       [name, email]
     );
-    
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Error creating user:', err);
-    
+
     if (err.code === '23505') { // Unique violation
       return res.status(409).json({ error: 'Email already exists' });
     }
-    
+
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -116,28 +119,28 @@ app.put('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { name, email } = req.body;
-    
+
     if (!name || !email) {
       return res.status(400).json({ error: 'Name and email are required' });
     }
-    
+
     const result = await pool.query(
       'UPDATE users SET name = $1, email = $2 WHERE id = $3 RETURNING *',
       [name, email, id]
     );
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Error updating user:', err);
-    
+
     if (err.code === '23505') { // Unique violation
       return res.status(409).json({ error: 'Email already exists' });
     }
-    
+
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -146,13 +149,13 @@ app.put('/api/users/:id', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING *', [id]);
-    
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     res.json({ message: 'User deleted successfully' });
   } catch (err) {
     console.error('Error deleting user:', err);
@@ -165,7 +168,7 @@ app.get('/api/stats', async (req, res) => {
   try {
     const result = await pool.query('SELECT COUNT(*) as user_count FROM users');
     const dbResult = await pool.query('SELECT version()');
-    
+
     res.json({
       user_count: parseInt(result.rows[0].user_count),
       database_version: dbResult.rows[0].version,
@@ -192,7 +195,7 @@ app.use('*', (req, res) => {
 // Start server
 const startServer = async () => {
   await initializeDatabase();
-  
+
   app.listen(PORT, () => {
     console.log(`🚀 Backend server running on port ${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
@@ -209,4 +212,4 @@ process.on('SIGTERM', () => {
   });
 });
 
-startServer().catch(console.error); 
+startServer().catch(console.error);
