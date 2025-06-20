@@ -18,7 +18,6 @@ COPY . .
 
 # Change ownership to nodejs user
 RUN chown -R nodejs:nodejs /app
-USER nodejs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
@@ -26,4 +25,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 EXPOSE 5000
 
-CMD ["node", "server.js"] 
+CMD ["node", "server.js"]
