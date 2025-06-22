@@ -47,6 +47,25 @@ phases:
       - echo "db_password = \"${DB_PASSWORD}\""            >> terraform.tfvars
       - echo Initializing Terraform...
       - terraform init
+      - echo Checking for existing conflicting resources...
+      - |
+        # Clean up existing resources that might conflict (in proper order)
+        echo "Checking for existing EKS addon..."
+        aws eks delete-addon --cluster-name cloudops-demo --addon-name aws-ebs-csi-driver --region ${AWS_DEFAULT_REGION} || echo "EKS addon not found"
+
+        echo "Waiting 30 seconds for addon deletion..."
+        sleep 30
+
+        echo "Checking for existing IAM role policy attachments..."
+        aws iam detach-role-policy --role-name cloudops-demo-aws-load-balancer-controller --policy-arn arn:aws:iam::${AWS_ACCOUNT_ID}:policy/cloudops-demo-aws-load-balancer-controller || echo "Policy attachment not found"
+
+        echo "Checking for existing IAM role..."
+        aws iam delete-role --role-name cloudops-demo-aws-load-balancer-controller || echo "IAM role not found"
+
+        echo "Checking for existing IAM policy..."
+        aws iam delete-policy --policy-arn arn:aws:iam::${AWS_ACCOUNT_ID}:policy/cloudops-demo-aws-load-balancer-controller || echo "IAM policy not found"
+
+        echo "Existing resource cleanup completed"
 
   build:
     commands:
