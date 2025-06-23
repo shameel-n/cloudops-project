@@ -32,9 +32,10 @@ Resources:
               Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/${EKSClusterOIDCIssuer}'
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
-              StringEquals:
-                !Sub '${EKSClusterOIDCIssuer}:sub': 'system:serviceaccount:kube-system:ebs-csi-controller-sa'
-                !Sub '${EKSClusterOIDCIssuer}:aud': 'sts.amazonaws.com'
+              StringEquals: !Sub
+                - '${OIDCIssuer}:sub': 'system:serviceaccount:kube-system:ebs-csi-controller-sa'
+                  '${OIDCIssuer}:aud': 'sts.amazonaws.com'
+                - OIDCIssuer: !Ref EKSClusterOIDCIssuer
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy
       Tags:
@@ -54,9 +55,10 @@ Resources:
               Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/${EKSClusterOIDCIssuer}'
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
-              StringEquals:
-                !Sub '${EKSClusterOIDCIssuer}:sub': 'system:serviceaccount:kube-system:aws-load-balancer-controller'
-                !Sub '${EKSClusterOIDCIssuer}:aud': 'sts.amazonaws.com'
+              StringEquals: !Sub
+                - '${OIDCIssuer}:sub': 'system:serviceaccount:kube-system:aws-load-balancer-controller'
+                  '${OIDCIssuer}:aud': 'sts.amazonaws.com'
+                - OIDCIssuer: !Ref EKSClusterOIDCIssuer
       Policies:
         - PolicyName: AWSLoadBalancerControllerIAMPolicy
           PolicyDocument:
@@ -201,7 +203,8 @@ Resources:
       AddonName: aws-ebs-csi-driver
       AddonVersion: v1.21.0-eksbuild.1
       ServiceAccountRoleArn: !GetAtt EBSCSIDriverRole.Arn
-      ResolveConflicts: OVERWRITE
+      ResolveConflictsOnCreate: OVERWRITE
+      ResolveConflictsOnUpdate: OVERWRITE
       Tags:
         - Key: Project
           Value: !Ref ProjectName
