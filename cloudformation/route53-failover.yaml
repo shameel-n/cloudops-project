@@ -1,0 +1,270 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Route53 Failover Routing for Disaster Recovery - CloudFormation Implementation'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cloudops-demo
+    Description: Name of the project
+
+  DomainName:
+    Type: String
+    Description: Domain name for the hosted zone (e.g., cloudops-demo.com)
+    Default: cloudops-demo.example.com
+
+  Subdomain:
+    Type: String
+    Description: Subdomain for the application (optional)
+    Default: ""
+
+  FailoverType:
+    Type: String
+    Default: SECONDARY
+    AllowedValues:
+      - PRIMARY
+      - SECONDARY
+    Description: Failover routing type
+
+  LoadBalancerDNSName:
+    Type: String
+    Description: DNS name of the Application Load Balancer in this region
+
+  LoadBalancerHostedZoneId:
+    Type: String
+    Description: Hosted zone ID of the Application Load Balancer
+
+  CreateHostedZone:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Whether to create a new hosted zone (should be false if PRIMARY region already created it)
+
+  ExistingHostedZoneId:
+    Type: String
+    Description: Existing hosted zone ID (required if CreateHostedZone is false)
+    Default: ""
+
+  AlertEmail:
+    Type: String
+    Description: Email address for health check alerts
+    Default: ""
+
+Conditions:
+  CreateHostedZone: !Equals [!Ref CreateHostedZone, "true"]
+  UseExistingHostedZone: !Equals [!Ref CreateHostedZone, "false"]
+  CreateEmailAlert: !Not [!Equals [!Ref AlertEmail, ""]]
+  HasSubdomain: !Not [!Equals [!Ref Subdomain, ""]]
+
+Resources:
+  # Route53 Hosted Zone (only create if specified)
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    Condition: CreateHostedZone
+    Properties:
+      Name: !Ref DomainName
+      HostedZoneConfig:
+        Comment: !Sub "Hosted zone for ${ProjectName} - ${DomainName}"
+      HostedZoneTags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${DomainName}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Health Check for this region's endpoint
+  HealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      Type: HTTP
+      ResourcePath: /health
+      FullyQualifiedDomainName: !Ref LoadBalancerDNSName
+      Port: 80
+      RequestInterval: 30
+      FailureThreshold: 3
+      MeasureLatency: true
+      InsufficientDataHealthStatus: Failure
+      EnableSNI: false
+      HealthCheckTags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-${AWS::Region}-health-check"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Region
+          Value: !Ref AWS::Region
+        - Key: FailoverType
+          Value: !Ref FailoverType
+
+  # Route53 Record with Failover Routing
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !If 
+        - CreateHostedZone
+        - !Ref HostedZone
+        - !Ref ExistingHostedZoneId
+      Name: !If
+        - HasSubdomain
+        - !Sub "${Subdomain}.${DomainName}"
+        - !Ref DomainName
+      Type: A
+      Failover: !Ref FailoverType
+      SetIdentifier: !Sub "${AWS::Region}-${FailoverType}"
+      HealthCheckId: !Ref HealthCheck
+      AliasTarget:
+        DNSName: !Ref LoadBalancerDNSName
+        HostedZoneId: !Ref LoadBalancerHostedZoneId
+        EvaluateTargetHealth: true
+
+  # SNS Topic for Health Check Alerts
+  HealthCheckAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-${AWS::Region}-health-alerts"
+      DisplayName: !Sub "Health Check Alerts - ${ProjectName} ${AWS::Region}"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Region
+          Value: !Ref AWS::Region
+
+  # Email Subscription for Alerts
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: CreateEmailAlert
+    Properties:
+      Protocol: email
+      TopicArn: !Ref HealthCheckAlertTopic
+      Endpoint: !Ref AlertEmail
+
+  # CloudWatch Alarm for Health Check
+  HealthCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-${AWS::Region}-health-check"
+      AlarmDescription: !Sub "Health check alarm for ${ProjectName} in ${AWS::Region}"
+      MetricName: HealthCheckStatus
+      Namespace: AWS/Route53
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: HealthCheckId
+          Value: !Ref HealthCheck
+      AlarmActions:
+        - !Ref HealthCheckAlertTopic
+      OKActions:
+        - !Ref HealthCheckAlertTopic
+      TreatMissingData: breaching
+
+  # CloudWatch Dashboard for Monitoring
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectName}-${AWS::Region}-failover-monitoring"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Route53", "HealthCheckStatus", "HealthCheckId", "${HealthCheck}" ],
+                  [ ".", "HealthCheckPercentHealthy", ".", "." ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "us-east-1",
+                "title": "Route53 Health Check Status - ${AWS::Region}",
+                "yAxis": {
+                  "left": {
+                    "min": 0,
+                    "max": 1
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [ "AWS/Route53", "ConnectionTime", "HealthCheckId", "${HealthCheck}" ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "us-east-1",
+                "title": "Health Check Connection Time - ${AWS::Region}"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  HostedZoneId:
+    Description: Route53 Hosted Zone ID
+    Value: !If 
+      - CreateHostedZone
+      - !Ref HostedZone
+      - !Ref ExistingHostedZoneId
+    Export:
+      Name: !Sub "${AWS::StackName}-HostedZone-ID"
+
+  HostedZoneNameServers:
+    Description: Route53 Hosted Zone Name Servers
+    Value: !If 
+      - CreateHostedZone
+      - !Join [',', !GetAtt HostedZone.NameServers]
+      - 'Not created in this stack'
+    Export:
+      Name: !Sub "${AWS::StackName}-NameServers"
+
+  HealthCheckId:
+    Description: Route53 Health Check ID
+    Value: !Ref HealthCheck
+    Export:
+      Name: !Sub "${AWS::StackName}-HealthCheck-ID"
+
+  HealthCheckFQDN:
+    Description: FQDN being monitored by health check
+    Value: !Ref LoadBalancerDNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-HealthCheck-FQDN"
+
+  DNSRecordName:
+    Description: DNS record name
+    Value: !Ref DNSRecord
+    Export:
+      Name: !Sub "${AWS::StackName}-DNS-Record"
+
+  ApplicationURL:
+    Description: Application URL with failover routing
+    Value: !If
+      - HasSubdomain
+      - !Sub "http://${Subdomain}.${DomainName}"
+      - !Sub "http://${DomainName}"
+    Export:
+      Name: !Sub "${AWS::StackName}-Application-URL"
+
+  SNSTopicArn:
+    Description: SNS Topic ARN for health check alerts
+    Value: !Ref HealthCheckAlertTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-SNS-Topic-ARN"
+
+  DashboardURL:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ProjectName}-${AWS::Region}-failover-monitoring"
+    Export:
+      Name: !Sub "${AWS::StackName}-Dashboard-URL" 

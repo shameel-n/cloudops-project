@@ -16,3 +16,11 @@ node_group_desired_size = 3
 db_name = "cloudops_demo"
 db_username = "postgres"
 db_password = "your-secure-password-here"  # Change this to a secure password
+
+# Route53 Failover Configuration (Phase 4)
+domain_name = "cloudops-demo.example.com"  # Replace with your actual domain
+subdomain = ""  # Optional: use "app" for app.yourdomain.com
+failover_type = "PRIMARY"  # Set to "SECONDARY" for other region
+create_hosted_zone = true  # Set to false for secondary region
+create_sns_topic = true
+alert_email = "your-email@example.com"  # Replace with your email

@@ -62,4 +62,45 @@ variable "node_group_desired_size" {
   description = "Desired size of the node group"
   type        = number
   default     = 3
+}
+
+# Route53 Failover Variables (Phase 4)
+variable "domain_name" {
+  description = "Domain name for Route53 hosted zone"
+  type        = string
+  default     = "cloudops-demo.example.com"
+}
+
+variable "subdomain" {
+  description = "Subdomain for the application (optional)"
+  type        = string
+  default     = ""
+}
+
+variable "failover_type" {
+  description = "Failover routing type: PRIMARY or SECONDARY"
+  type        = string
+  default     = "PRIMARY"
+  validation {
+    condition     = contains(["PRIMARY", "SECONDARY"], var.failover_type)
+    error_message = "Failover type must be either PRIMARY or SECONDARY."
+  }
+}
+
+variable "create_hosted_zone" {
+  description = "Whether to create a new hosted zone or use existing one"
+  type        = bool
+  default     = true
+}
+
+variable "create_sns_topic" {
+  description = "Whether to create SNS topic for health check alerts"
+  type        = bool
+  default     = true
+}
+
+variable "alert_email" {
+  description = "Email address for health check alerts"
+  type        = string
+  default     = ""
 } 

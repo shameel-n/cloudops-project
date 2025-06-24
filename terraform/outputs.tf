@@ -77,4 +77,35 @@ output "codebuild_role_arn" {
 output "kubectl_config_command" {
   description = "Command to configure kubectl"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
+}
+
+# Route53 Failover Outputs (Phase 4)
+output "route53_hosted_zone_id" {
+  description = "Route53 hosted zone ID"
+  value       = module.route53_failover.hosted_zone_id
+}
+
+output "route53_name_servers" {
+  description = "Route53 hosted zone name servers"
+  value       = module.route53_failover.hosted_zone_name_servers
+}
+
+output "route53_health_check_id" {
+  description = "Route53 health check ID"
+  value       = module.route53_failover.health_check_id
+}
+
+output "application_dns_name" {
+  description = "Application DNS name with failover"
+  value       = module.route53_failover.dns_record_fqdn
+}
+
+output "load_balancer_endpoint" {
+  description = "Load balancer endpoint for this region"
+  value       = module.route53_failover.load_balancer_dns_name
+}
+
+output "health_check_alarm" {
+  description = "CloudWatch alarm for health check"
+  value       = module.route53_failover.cloudwatch_alarm_name
 } 

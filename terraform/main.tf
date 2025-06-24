@@ -18,7 +18,7 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = {
       Project     = "CloudOps-Demo"
@@ -120,7 +120,7 @@ module "eks" {
   eks_managed_node_groups = {
     blue = {
       name = "${local.name}-blue"
-      
+
       min_size     = 1
       max_size     = 10
       desired_size = 3
@@ -168,11 +168,11 @@ module "rds" {
 
   cluster_name = local.name
   environment  = var.environment
-  
+
   vpc_id               = module.vpc.vpc_id
   private_subnet_ids   = module.vpc.intra_subnets
   eks_security_group_id = module.eks.cluster_security_group_id
-  
+
   db_name     = var.db_name
   db_username = var.db_username
   db_password = var.db_password
@@ -188,7 +188,7 @@ module "ecr" {
   source = "./modules/ecr"
 
   repository_names = ["cloudops-frontend", "cloudops-backend"]
-  
+
   tags = local.tags
 }
 
@@ -200,7 +200,7 @@ module "codebuild_role" {
   source = "./modules/iam"
 
   cluster_name = local.name
-  
+
   tags = local.tags
 }
 
@@ -224,7 +224,7 @@ module "ebs_csi_role" {
 
   cluster_name = module.eks.cluster_name
   oidc_provider_arn = module.eks.oidc_provider_arn
-  
+
   tags = local.tags
 }
 
@@ -242,4 +242,89 @@ module "load_balancer_controller" {
   depends_on = [module.eks]
 
   tags = local.tags
-} 
+}
+
+################################################################################
+# Route53 Failover (Phase 4)
+################################################################################
+
+module "route53_failover" {
+  source = "./modules/route53-failover"
+
+  domain_name         = var.domain_name
+  subdomain          = var.subdomain
+  region             = var.aws_region
+  failover_type      = var.failover_type
+  create_hosted_zone = var.create_hosted_zone
+  create_sns_topic   = var.create_sns_topic
+  alert_email        = var.alert_email
+
+  depends_on = [module.load_balancer_controller]
+  tags       = local.tags
+}
+
+################################################################################
+# Phase 5: CloudWatch Logging & Monitoring
+################################################################################
+
+resource "aws_iam_policy" "cloudwatch_logs_policy" {
+  name        = "${local.name}-cloudwatch-logs-policy"
+  description = "Allows EKS nodes to send container logs to CloudWatch"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:DescribeLogStreams"
+        ],
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "nodes_cloudwatch_attachment" {
+  policy_arn = aws_iam_policy.cloudwatch_logs_policy.arn
+  # The EKS module creates a role for each node group. We attach the policy here.
+  role       = module.eks.eks_managed_node_groups["blue"].iam_role_name
+}
+
+resource "aws_cloudwatch_dashboard" "main_dashboard" {
+  dashboard_name = "${local.name}-main-dashboard"
+
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "log",
+        x      = 0,
+        y      = 0,
+        width  = 12,
+        height = 12,
+        properties = {
+          query = "SOURCE '/aws/eks/${local.name}/application-logs' | fields @timestamp, @message, kubernetes.pod_name | filter kubernetes.pod_name like /frontend-deployment/ | sort @timestamp desc | limit 100",
+          region = var.aws_region,
+          title  = "Frontend Application Logs"
+        }
+      },
+      {
+        type   = "log",
+        x      = 12,
+        y      = 0,
+        width  = 12,
+        height = 12,
+        properties = {
+          query = "SOURCE '/aws/eks/${local.name}/application-logs' | fields @timestamp, @message, kubernetes.pod_name | filter kubernetes.pod_name like /backend-deployment/ | sort @timestamp desc | limit 100",
+          region = var.aws_region,
+          title  = "Backend Application Logs"
+        }
+      }
+    ]
+  })
+}
